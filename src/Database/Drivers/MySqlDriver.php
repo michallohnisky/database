@@ -24,6 +24,12 @@ class MySqlDriver extends Nette\Object implements Nette\Database\ISupplementalDr
 	/** @var Nette\Database\Connection */
 	private $connection;
 
+	/** @var \DateTimeZone */
+	private $connectionTz;
+
+	/** @var \DateTimeZone|NULL */
+	private $applicationTz;
+
 
 	/**
 	 * Driver options:
@@ -42,6 +48,10 @@ class MySqlDriver extends Nette\Object implements Nette\Database\ISupplementalDr
 		if (isset($options['sqlmode'])) {
 			$connection->query("SET sql_mode='$options[sqlmode]'");
 		}
+		
+		$this->connectionTz = new \DateTimeZone(isset($options['connectionTz']) ? $options['connectionTz'] : date_default_timezone_get());
+		$this->applicationTz = isset($options['applicationTz']) ? new \DateTimeZone($options['applicationTz']) : NULL;
+		$connection->query("SET time_zone='" . $this->connectionTz->getName() . "'");
 	}
 
 
@@ -96,6 +106,12 @@ class MySqlDriver extends Nette\Object implements Nette\Database\ISupplementalDr
 	 */
 	public function formatDateTime(/*\DateTimeInterface*/ $value)
 	{
+		// modify to connectionTz
+		if ($value->getTimezone()->getName() !== $this->connectionTz->getName()) {
+			$value = clone $value;
+			$value->setTimeZone($this->connectionTz);
+		}
+
 		return $value->format("'Y-m-d H:i:s'");
 	}
 
@@ -128,6 +144,28 @@ class MySqlDriver extends Nette\Object implements Nette\Database\ISupplementalDr
 	 */
 	public function normalizeRow($row)
 	{
+		foreach ($row as $key => $value) {
+			if ($value instanceof \DateTime || $value instanceof \DateTimeInterface) {
+
+				// set connectionTz
+				if ($value->getTimezone()->getName() !== $this->connectionTz->getName()) {
+					$row[$key] = $value = new \Nette\Utils\DateTime($value->format('Y-m-d H:i:s'), $this->connectionTz);
+				}
+
+				// modify to applicationTz
+				if ($this->applicationTz) {
+					if ($value->getTimezone()->getName() !== $this->applicationTz->getName()) {
+						$value->setTimeZone($this->applicationTz);
+					}
+				} else {
+					$tz = date_default_timezone_get();
+					if ($value->getTimezone()->getName() !== $tz) {
+						$value->setTimeZone(new \DateTimeZone($tz));
+					}
+				}
+			}
+		}
+
 		return $row;
 	}
 
